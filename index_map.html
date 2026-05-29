@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReligioGuessr</title>
+  <!-- Leaflet CSS must be in <head> -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #0c111a;
+      color: #dde4ee;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── GAME SCREEN ── */
+    #game-screen {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Image — always block, always filling screen */
+    #game-image {
+      display: block;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    #game-image.dimmed { filter: brightness(0.25); }
+
+    /* Error when image fails */
+    #img-error {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: #6a80a0;
+      font-size: 0.85rem;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    /* Top gradient for HUD readability */
+    #top-fade {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 80px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* HUD */
+    #hud {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 14px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #hud-title {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: #d4943a;
+      letter-spacing: 2px;
+    }
+    .pill {
+      background: rgba(10,15,24,0.82);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      margin-left: 8px;
+    }
+    .pill b { color: #d4943a; }
+
+    /* ── MAP WIDGET ── */
+    #map-widget {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      width: 265px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,0.14);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.65);
+      z-index: 20;
+      transition: width 0.3s ease, border-color 0.2s;
+    }
+    #map-widget:hover { border-color: rgba(212,148,58,0.5); }
+    #map-widget.big   { width: 460px; }
+
+    #map-canvas {
+      width: 100%;
+      height: 200px;
+      transition: height 0.3s ease;
+    }
+    #map-widget.big #map-canvas { height: 360px; }
+
+    #map-bar {
+      height: 44px;
+      background: #141e2d;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 8px;
+    }
+    #map-hint {
+      flex: 1;
+      font-size: 0.7rem;
+      color: #6a80a0;
+    }
+    #btn-expand {
+      background: #1c2a3e;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #dde4ee;
+      border-radius: 5px;
+      padding: 5px 9px;
+      font-size: 0.7rem;
+      font-family: Arial, sans-serif;
+      cursor: pointer;
+    }
+    #btn-expand:hover { border-color: #d4943a; color: #d4943a; }
+
+    #btn-guess {
+      background: #d4943a;
+      color: #0c111a;
+      border: none;
+      border-radius: 5px;
+      padding: 6px 13px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      font-family: Arial, sans-serif;
+      cursor: pointer;
+    }
+    #btn-guess:disabled {
+      background: #1c2a3e;
+      color: #6a80a0;
+      cursor: not-allowed;
+    }
+    #btn-guess:not(:disabled):hover { background: #f0b85a; }
+
+    /* Leaflet overrides */
+    .leaflet-container { background: #0e1824 !important; }
+    .leaflet-control-zoom a {
+      background: #141e2d !important;
+      color: #dde4ee !important;
+      border-color: rgba(255,255,255,0.1) !important;
+    }
+    .leaflet-control-zoom a:hover { background: #d4943a !important; color: #0c111a !important; }
+    .leaflet-tile-pane { filter: brightness(0.75) saturate(0.8); }
+    .leaflet-popup-content-wrapper {
+      background: #141e2d; color: #dde4ee;
+      border-radius: 7px; font-family: Arial, sans-serif; font-size: 0.8rem;
+    }
+    .leaflet-popup-tip { background: #141e2d; }
+
+    /* ── RESULT PANEL ── */
+    #result-panel {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 42%;
+      min-width: 300px;
+      background: #141e2d;
+      border-right: 1px solid rgba(255,255,255,0.08);
+      z-index: 30;
+      flex-direction: column;
+      overflow: hidden;
+      animation: slideIn 0.3s ease;
+    }
+    #result-panel.open { display: flex; }
+    @keyframes slideIn {
+      from { transform: translateX(-20px); opacity: 0; }
+      to   { transform: translateX(0);     opacity: 1; }
+    }
+
+    #result-thumb {
+      width: 100%; height: 185px;
+      object-fit: cover; flex-shrink: 0;
+    }
+
+    /* Score strip */
+    #result-scores {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    .score-box {
+      flex: 1;
+      padding: 12px 14px;
+      border-right: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .score-box:last-child { border-right: none; }
+    .sc-label { font-size: 0.6rem; color: #6a80a0; text-transform: uppercase; letter-spacing: 0.8px; }
+    .sc-val   { font-size: 1.4rem; font-weight: bold; color: #d4943a; }
+    .sc-sub   { font-size: 0.7rem; color: #6a80a0; }
+
+    #result-loc {
+      padding: 9px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-size: 0.8rem;
+      color: #dde4ee;
+      flex-shrink: 0;
+    }
+
+    #result-blurbs {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #result-blurbs::-webkit-scrollbar { width: 3px; }
+    #result-blurbs::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+    .blurb {
+      background: #1c2a3e;
+      border-radius: 7px;
+      padding: 11px 13px;
+    }
+    .blurb-title {
+      font-size: 0.6rem;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #d4943a;
+      margin-bottom: 6px;
+    }
+    .blurb-text {
+      font-size: 0.78rem;
+      line-height: 1.7;
+      color: #6a80a0;
+    }
+
+    #result-footer {
+      padding: 13px 16px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    #btn-next {
+      width: 100%;
+      background: #d4943a;
+      color: #0c111a;
+      border: none;
+      border-radius: 7px;
+      padding: 12px;
+      font-size: 0.88rem;
+      font-weight: bold;
+      font-family: Arial, sans-serif;
+      cursor: pointer;
+    }
+    #btn-next:hover { background: #f0b85a; }
+
+    /* Map legend shown after guess */
+    #map-legend {
+      display: none;
+      position: absolute;
+      top: 10px; left: 10px;
+      background: rgba(10,15,24,0.85);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 7px;
+      padding: 8px 12px;
+      font-size: 0.7rem;
+      z-index: 1000;
+      pointer-events: none;
+    }
+    .leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .leg-row:last-child { margin-bottom: 0; }
+    .leg-dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff; flex-shrink: 0; }
+
+    /* ── FINAL SCREEN ── */
+    #final-screen {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: #0c111a;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 40;
+      overflow-y: auto;
+      padding: 30px 20px;
+    }
+    #final-screen.open { display: flex; }
+    #final-title { font-size: 1.8rem; font-weight: bold; color: #d4943a; letter-spacing: 3px; }
+    #final-ring {
+      width: 150px; height: 150px; border-radius: 50%;
+      border: 3px solid #d4943a;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      box-shadow: 0 0 0 8px rgba(212,148,58,0.14), 0 0 40px rgba(212,148,58,0.2);
+    }
+    #final-num   { font-size: 2.4rem; font-weight: bold; color: #d4943a; }
+    #final-denom { font-size: 0.72rem; color: #6a80a0; }
+    #final-grade { font-size: 1.2rem; font-weight: bold; color: #dde4ee; }
+    #final-grid  {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+      gap: 8px; width: 100%; max-width: 800px;
+    }
+    .final-card {
+      background: #141e2d; border-radius: 7px;
+      padding: 10px 12px; font-size: 0.75rem; color: #dde4ee;
+    }
+    .final-card .fc-score { font-size: 1rem; font-weight: bold; color: #d4943a; }
+    .final-card .fc-dist  { font-size: 0.65rem; color: #6a80a0; }
+    #btn-again {
+      background: #d4943a; color: #0c111a;
+      border: none; border-radius: 25px;
+      padding: 12px 40px; font-size: 0.9rem;
+      font-weight: bold; font-family: Arial, sans-serif; cursor: pointer;
+    }
+    #btn-again:hover { background: #f0b85a; }
+  </style>
+</head>
+<body>
+
+<!-- GAME SCREEN -->
+<div id="game-screen">
+
+  <!-- Full-screen background image -->
+  <img id="game-image" src="" alt="">
+  <div id="img-error">
+    Image could not be loaded<br>
+    <span id="img-error-path" style="font-size:0.7rem;color:#4a6080"></span>
+  </div>
+
+  <div id="top-fade"></div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="hud-title">ReligioGuessr</div>
+    <div style="display:flex">
+      <div class="pill">Round <b id="h-round">1</b> / <b id="h-total">5</b></div>
+      <div class="pill">Score: <b id="h-score">0</b></div>
+    </div>
+  </div>
+
+  <!-- Map widget (bottom-right corner) -->
+  <div id="map-widget">
+    <div id="map-canvas">
+      <!-- Map legend (shown after guess) -->
+      <div id="map-legend">
+        <div class="leg-row"><div class="leg-dot" style="background:#4a9eff"></div>Your guess</div>
+        <div class="leg-row"><div class="leg-dot" id="leg-actual-dot" style="background:#d4943a"></div>Actual location</div>
+      </div>
+    </div>
+    <div id="map-bar">
+      <span id="map-hint">Click map to place pin</span>
+      <button id="btn-expand" onclick="toggleExpand()">⤢ Expand</button>
+      <button id="btn-guess" disabled onclick="submitGuess()">GUESS</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- RESULT PANEL (slides in from left after guess) -->
+<div id="result-panel">
+  <img id="result-thumb" src="" alt="" onerror="this.style.display='none'">
+
+  <div id="result-scores">
+    <div class="score-box">
+      <div class="sc-label">Round Score</div>
+      <div class="sc-val" id="sc-pts">0</div>
+      <div class="sc-sub" id="sc-grade"></div>
+    </div>
+    <div class="score-box">
+      <div class="sc-label">Distance</div>
+      <div class="sc-val" id="sc-dist">—</div>
+    </div>
+    <div class="score-box">
+      <div class="sc-label">Total</div>
+      <div class="sc-val" id="sc-total">0</div>
+    </div>
+  </div>
+
+  <div id="result-loc">📍 <span id="result-loc-txt"></span></div>
+
+  <div id="result-blurbs">
+    <div class="blurb">
+      <div class="blurb-title">About This Image</div>
+      <div class="blurb-text" id="blurb-img"></div>
+    </div>
+    <div class="blurb">
+      <div class="blurb-title">Geography &amp; Religion</div>
+      <div class="blurb-text" id="blurb-rel"></div>
+    </div>
+  </div>
+
+  <div id="result-footer">
+    <button id="btn-next" onclick="nextRound()">NEXT ROUND →</button>
+  </div>
+</div>
+
+<!-- FINAL SCREEN -->
+<div id="final-screen">
+  <div id="final-title">FINAL RESULTS</div>
+  <div id="final-ring">
+    <div id="final-num">0</div>
+    <div id="final-denom">/ 0 pts</div>
+  </div>
+  <div id="final-grade"></div>
+  <div id="final-grid"></div>
+  <button id="btn-again" onclick="restart()">PLAY AGAIN</button>
+</div>
+
+<!-- Leaflet JS loaded BEFORE game script so L is always defined -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// ── RELIGION DATA ──────────────────────────────────────────────
+const RELIGIONS = [
+  {
+    id:"hinduism", name:"Hinduism", color:"#e06820",
+    blurb:"Hinduism is one of the world's oldest religions, originating in the Indus Valley over 4,000 years ago. It is a diverse tradition encompassing a vast array of deities, rituals, philosophies, and texts, with no single founder or central authority. The geography of the Indian subcontinent shaped Hinduism profoundly: sacred rivers like the Ganges are worshipped as goddesses, the Himalayas are considered the abode of the gods, and the monsoon cycle drove the agricultural festivals that became central to Hindu worship. The relative isolation of the subcontinent allowed this tradition to develop its enormous internal diversity over millennia.",
+    images:[
+      { src:"images/hinduism/1.jpg", coords:[25.3176,82.9739],   location:"Varanasi, Uttar Pradesh, India",
+        imageBlurb:"The Ganges descends from the Himalayas through the North Indian plain, and Varanasi sits at a sacred bend in the river where Hindus believe the waters carry the power to cleanse sin and ease the passage of the dead." },
+      { src:"images/hinduism/2.jpg", coords:[27.4924,77.6737],   location:"Mathura/Vrindavan, Uttar Pradesh, India",
+        imageBlurb:"Holi originates in the agricultural heartland of the Gangetic plain, where the arrival of spring after the dry season was celebrated as a divine gift tied to Krishna, a deity deeply connected to the landscape of Braj." },
+      { src:"images/hinduism/3.jpg", coords:[9.9195,78.1193],    location:"Madurai, Tamil Nadu, India",
+        imageBlurb:"The lush river valleys of South India, sheltered from northern invasions by the Deccan Plateau, allowed a distinct Dravidian Hindu tradition to flourish, producing towering temple gopurams as expressions of divine geography." }
+    ]
+  },
+  {
+    id:"buddhism", name:"Buddhism", color:"#c8970a",
+    blurb:"Buddhism was founded in the 5th century BCE by Siddhartha Gautama in the foothills of the Himalayas in present-day Nepal. It centers on the Four Noble Truths and the Eightfold Path as a means of ending suffering and achieving enlightenment. The geography of Asia shaped Buddhism's spread and character: Himalayan terrain encouraged isolated monastic communities, ancient Silk Road trade routes carried the faith into Central and East Asia, and the forests of Southeast Asia gave rise to the tradition of forest-dwelling monks. As Buddhism crossed mountains, deserts, and seas, it adapted to each new landscape, producing distinct Theravada, Mahayana, and Vajrayana schools.",
+    images:[
+      { src:"images/buddhism/1.jpg", coords:[16.7985,96.1492],   location:"Yangon, Myanmar",
+        imageBlurb:"Myanmar's position as a lowland river civilization between India and China made it a crossroads for Theravada Buddhism traveling along monsoon trade routes, and the Shwedagon Pagoda rose as the region's supreme expression of Buddhist devotion." },
+      { src:"images/buddhism/2.jpg", coords:[28.8000,83.9500],   location:"Thorong La Pass, Nepal/Tibet region",
+        imageBlurb:"The extreme altitude of the Tibetan plateau, which isolated communities from the outside world for centuries, allowed a unique form of Buddhism called Vajrayana to develop in which mountain passes, winds, and sky were incorporated as sacred channels for prayer." },
+      { src:"images/buddhism/3.jpg", coords:[29.5441,103.7714],  location:"Leshan, Sichuan, China",
+        imageBlurb:"The Leshan Buddha was carved at the confluence of three rivers in a mountainous river gorge, and the project was motivated by the geography itself: monks believed the statue would calm the dangerous currents that killed boatmen navigating the rocky confluence." }
+    ]
+  },
+  {
+    id:"islam", name:"Islam", color:"#2a9d5c",
+    blurb:"Islam was founded in the Arabian Peninsula in the 7th century CE by the Prophet Muhammad. It is the world's second-largest religion, centered on submission to Allah and guided by the Quran and the Hadith. The desert geography of Arabia shaped Islam's core values: hospitality, community solidarity, and equality before God reflect the survival demands of arid environments. The trade winds of the Indian Ocean and overland caravan routes carried Islam across Africa, Persia, South Asia, and Southeast Asia, where it adapted to local cultures while maintaining a unified global identity centered on Mecca.",
+    images:[
+      { src:"images/islam/1.jpg", coords:[31.7781,35.2354],      location:"Temple Mount, Jerusalem, Israel",
+        imageBlurb:"Jerusalem's position as the geographic and cultural center of three Abrahamic faiths made it the site where Islam's third holiest shrine was built, marking the rock from which Muhammad is believed to have ascended to heaven on the Night Journey." },
+      { src:"images/islam/2.jpg", coords:[21.4225,39.8262],      location:"Mecca, Hejaz region, Saudi Arabia",
+        imageBlurb:"Mecca sits in a narrow, waterless valley in the Hejaz mountains of the Arabian Peninsula, and its geographic position as a rare reliable water source on ancient caravan routes made it both a commercial and spiritual center long before Islam, embedding the pilgrimage geography into the religion's foundation." },
+      { src:"images/islam/3.jpg", coords:[37.1760,3.5881],       location:"Granada, Andalusia, Spain",
+        imageBlurb:"Granada sits at the foot of the Sierra Nevada mountains in southern Spain, the last stronghold of Moorish Islamic civilization in Iberia, and the Alhambra's intricate geometric art reflects an Islamic tradition shaped partly by the arid, geometric North African and Andalusian landscape rather than figurative representation." }
+    ]
+  },
+  {
+    id:"christianity", name:"Christianity", color:"#4a7ec8",
+    blurb:"Christianity originated in the eastern Mediterranean in the 1st century CE, rooted in the Jewish traditions of the Levant. It is the world's largest religion, centered on the life, death, and resurrection of Jesus of Nazareth. The Roman road network and Mediterranean sea routes enabled rapid early spread across Europe and North Africa, while geographic barriers later fostered distinct regional traditions. Desert landscapes shaped early Christian asceticism and monasticism, and the geography of the Holy Land, including the Jordan River, Sea of Galilee, and hills of Jerusalem, remains central to Christian pilgrimage and identity.",
+    images:[
+      { src:"images/christianity/1.jpg", coords:[41.9029,12.4534], location:"Vatican City, Rome, Italy",
+        imageBlurb:"Rome's position at the center of the Roman Empire's road and sea networks made it the natural hub of the early Catholic Church, and the Vatican's concentration of wealth and political power in a geographically central European location funded the Renaissance art that became Christianity's most recognizable imagery." },
+      { src:"images/christianity/2.jpg", coords:[31.8333,35.5500], location:"Qasr el Yahud, Jordan River, West Bank",
+        imageBlurb:"The Jordan River flows through one of the world's lowest and driest landscapes, the Jordan Rift Valley, and its water held extraordinary significance in an arid region where rivers were life-giving, making it the natural setting for the baptism ritual that defines Christian entry into faith." },
+      { src:"images/christianity/3.jpg", coords:[31.7730,35.2040], location:"Israel Museum, Jerusalem, Israel",
+        imageBlurb:"The Dead Sea Scrolls survived 2,000 years because the extreme aridity of the Judean Desert around the Dead Sea, the lowest and driest point on Earth, preserved organic materials that would have rotted anywhere else, making geography directly responsible for the survival of the oldest known biblical manuscripts." }
+    ]
+  },
+  {
+    id:"judaism", name:"Judaism", color:"#a0522d",
+    blurb:"Judaism is one of the world's oldest monotheistic religions, originating among the ancient Israelites of the Levant roughly 3,000 years ago. It centers on a covenantal relationship between God and the Jewish people, as recorded in the Torah. The geography of Canaan, positioned as a land bridge between major civilizations, exposed the Israelites to constant conquest and displacement, which profoundly shaped Jewish theology and practice. Successive exiles forced Judaism to transform from a temple-based, land-centered religion into a portable, text-centered faith capable of surviving anywhere in the world.",
+    images:[
+      { src:"images/judaism/1.jpg", coords:[31.7767,35.2345],    location:"Western Wall Plaza, Jerusalem, Israel",
+        imageBlurb:"The Western Wall is the last surviving remnant of the Second Temple, destroyed by Rome in 70 CE, and Jerusalem's geographic position as a prize repeatedly conquered by empires made exile and longing for this specific location a defining force in Jewish identity and practice worldwide." },
+      { src:"images/judaism/2.jpg", coords:[41.8921,12.4771],    location:"Great Synagogue of Rome, Italy",
+        imageBlurb:"The Torah scroll's portability made it the central object of Jewish religious life because Jewish communities, scattered across every continent through diaspora forced by geographic displacement and conquest, needed a faith that could be carried rather than anchored to a single temple or land." },
+      { src:"images/judaism/3.jpg", coords:[50.0901,14.4183],    location:"Josefov (Jewish Quarter), Prague, Czech Republic",
+        imageBlurb:"Prague's location as a medieval central European trading hub attracted a large Jewish community, but geographic confinement to the walled ghetto meant the cemetery could not expand outward, forcing graves to be stacked up to 12 layers deep and creating one of the most visually distinctive Jewish heritage sites in Europe." }
+    ]
+  },
+  {
+    id:"shinto", name:"Shinto", color:"#d04040",
+    blurb:"Shinto is the indigenous spiritual tradition of Japan, with roots stretching back thousands of years into Japanese prehistory. It centers on kami, sacred spirits or forces that inhabit natural phenomena including mountains, rivers, waterfalls, rocks, and trees. Japan's geography as a volcanic island chain prone to earthquakes and typhoons shaped a spirituality deeply attuned to the power and unpredictability of nature. The island setting fostered a distinct cultural identity, and the particular landscapes of Japan, from Mount Fuji to the cedar forests of Ise, became inseparable from Shinto's sacred geography.",
+    images:[
+      { src:"images/shinto/1.jpg", coords:[34.9671,135.7727],    location:"Fushimi Ward, Kyoto, Japan",
+        imageBlurb:"Fushimi Inari is built on a forested hill at the edge of the ancient capital Kyoto, and the thousands of torii gates tunneling through the mountain forest express Shinto's belief that the boundary between the human and spirit world thins as you move deeper into natural landscape." },
+      { src:"images/shinto/2.jpg", coords:[34.2955,132.3196],    location:"Miyajima Island, Hiroshima Prefecture, Japan",
+        imageBlurb:"Miyajima is a small island in the Seto Inland Sea, and its famous torii gate was built rising from the tidal water so that the entire island, considered too sacred for ordinary human activity like birth and death, would appear to float between sea and sky." },
+      { src:"images/shinto/3.jpg", coords:[34.5063,136.7839],    location:"Futami, Ise, Mie Prefecture, Japan",
+        imageBlurb:"The Meoto Iwa are two rocks rising from the Pacific Ocean just offshore from the Ise coast, and the Shinto belief that these rocks embody a married couple of kami reflects how Japan's island geography made the sea, its formations, and its shoreline inseparable from sacred identity." }
+    ]
+  },
+  {
+    id:"aboriginal", name:"Aboriginal Spirituality", color:"#b87820",
+    blurb:"Aboriginal Australian spirituality encompasses the diverse traditional beliefs of Australia's Indigenous peoples, representing one of the oldest continuous religious traditions on Earth, with roots stretching back at least 65,000 years. Central to most Aboriginal traditions is the Dreaming, a cosmological framework in which ancestral beings shaped the land and established the laws that govern life. The Australian landscape itself is sacred: songlines trace the paths of ancestral beings across deserts, coastlines, and mountains, making geographic knowledge inseparable from spiritual knowledge. The harshness of the Australian interior, particularly its scarcity of water, made sacred relationships with specific places and deep environmental knowledge essential to survival.",
+    images:[
+      { src:"images/aboriginal/1.jpg", coords:[-25.3444,131.0369], location:"Uluru, Northern Territory, Australia",
+        imageBlurb:"Uluru is a massive sandstone formation rising from the flat red desert of central Australia, sacred to the Anangu people as the physical embodiment of ancestral Dreaming beings, and its geographic isolation in the continent's arid interior made it a navigational and spiritual landmark for thousands of years." },
+      { src:"images/aboriginal/2.jpg", coords:[-12.8643,132.5714], location:"Kakadu National Park, Northern Territory, Australia",
+        imageBlurb:"Kakadu sits in Australia's monsoon tropics where annual flooding of the Arnhem Land escarpment concentrated enormous biodiversity, and the X-ray paintings of fish, turtles, and animals in the rock shelters reflect a spirituality in which the creatures of this specific floodplain environment were sacred messengers between the human and Dreaming worlds." },
+      { src:"images/aboriginal/3.jpg", coords:[-15.0000,133.0000], location:"Northern Territory, Australia",
+        imageBlurb:"The didgeridoo was developed in the tropical north of Australia where termites hollow out the eucalyptus trees that produce the instrument, making it a direct product of the specific ecosystem of the Top End, and its drone sound is used in ceremonies to connect participants to the Dreaming geography of the land beneath them." }
+    ]
+  },
+  {
+    id:"daoism", name:"Daoism", color:"#607080",
+    blurb:"Daoism is an ancient Chinese philosophical and religious tradition dating to at least the 4th century BCE, associated with the legendary sage Laozi. It centers on the Dao, or the natural Way, a force that underlies and unifies all things in the universe. The landscapes of China, including its great rivers, towering mountains, dense forests, and seasonal floods, inspired Daoist thought: concepts like wu wei (non-action) and yin-yang reflect careful observation of natural cycles. Sacred mountains such as Wudang and Huashan became major centers of Daoist practice, valued for their remoteness and perceived spiritual power.",
+    images:[
+      { src:"images/daoism/1.jpg", coords:[39.9010,116.3360],    location:"Xicheng District, Beijing, China",
+        imageBlurb:"Beijing's position as the political capital of China made the White Cloud Temple, headquarters of the Quanzhen school of Daoism, a site where imperial geography and Daoist practice intersected, with the temple's layout designed to mirror the natural cosmological order of heaven, earth, and humanity." },
+      { src:"images/daoism/2.jpg", coords:[32.4006,111.0042],    location:"Wudang Mountain, Hubei, China",
+        imageBlurb:"Wudang Mountain rises dramatically from the central Chinese plains, and its steep, fog-covered peaks were considered so close to heaven that it became the principal sacred mountain of Daoism, with temples built into the cliffs to express the Daoist ideal that spiritual truth is found in remote, untouched landscapes." },
+      { src:"images/daoism/3.jpg", coords:[34.4867,110.0847],    location:"Huashan, Shaanxi, China",
+        imageBlurb:"Huashan is one of China's Five Sacred Mountains, a system of peaks designated as sacred because they marked the geographic boundaries of the ancient Chinese world, and the terrifying plank walk carved into its vertical granite face embodies the Daoist belief that spiritual advancement requires confronting and moving through the power of the natural world." }
+    ]
+  },
+  {
+    id:"mayan", name:"Mayan Religion", color:"#2a8050",
+    blurb:"Mayan religion is the traditional spiritual system of the Maya people of Mesoamerica, with roots extending back over 3,000 years across present-day Mexico, Guatemala, Belize, Honduras, and El Salvador. It centered on a complex pantheon, an intricate cosmology of multiple creation cycles, and the belief that human sacrifice sustained the universe. The varied landscape of Mesoamerica shaped Mayan religion directly: cenotes (natural limestone sinkholes) were revered as portals to the underworld Xibalba, volcanic mountains were seen as the bodies of gods, and the tropical agricultural cycle dependent on rainfall drove development of the sophisticated Mayan calendar. Astronomical precision reached extraordinary levels partly because of the clear skies above the highland plateaus.",
+    images:[
+      { src:"images/mayan/1.jpg", coords:[20.6843,-88.5678],     location:"Chichen Itza, Yucatan, Mexico",
+        imageBlurb:"El Castillo was built with precise astronomical alignment so that at the spring and fall equinoxes, the setting sun casts a shadow along the pyramid's staircase that creates the illusion of a feathered serpent descending, a direct product of the Mayan need to track the tropical agricultural calendar in a landscape with no seasonal temperature change as a guide." },
+      { src:"images/mayan/2.jpg", coords:[20.6920,-88.5672],     location:"Chichen Itza, Yucatan, Mexico",
+        imageBlurb:"The Yucatan Peninsula is a flat limestone shelf with no surface rivers, so the cenotes, natural sinkholes that reveal the underground water table, were the only freshwater sources for hundreds of kilometers, making them literally the openings to a life-giving underworld that the Maya called Xibalba." },
+      { src:"images/mayan/3.jpg", coords:[19.4260,-99.1860],     location:"National Museum of Anthropology, Mexico City",
+        imageBlurb:"Palenque sits in the foothills where the Chiapas highlands meet the Gulf Coast lowlands, and jade, mined from river beds in the highland valleys of Guatemala and Mexico, was considered the most sacred material in Mesoamerica because its green color represented water, maize, and the fertile landscape that sustained Mayan civilization." }
+    ]
+  },
+  {
+    id:"yoruba", name:"Yoruba Religion", color:"#9040a0",
+    blurb:"Yoruba religion is the traditional spiritual system of the Yoruba people of West Africa, centered in present-day Nigeria, Benin, and Togo, with a history spanning over a thousand years. It centers on a supreme deity, Olodumare, and a vast pantheon of intermediary divine forces called Orishas, each governing a domain of nature and human experience. The West African landscape shaped the Yoruba pantheon directly: the Niger River, Ogun River, and sacred forests each have associated Orishas, and the fertility of the agricultural land is central to religious practice. Yoruba religion gained global reach through the transatlantic slave trade, evolving into diaspora traditions including Candomble, Santeria, and Trinidad Orisha across the Americas.",
+    images:[
+      { src:"images/yoruba/1.jpg", coords:[7.4914,4.5589],       location:"National Museum, Ile-Ife, Nigeria",
+        imageBlurb:"Ile-Ife sits at the geographic center of Yoruba territory in the forest zone of southwestern Nigeria, and Yoruba cosmology identifies it as the site where the deity Oduduwa descended from the sky on a chain and scattered sand to form the earth, making the specific geography of this city the origin point of all human civilization in Yoruba belief." },
+      { src:"images/yoruba/2.jpg", coords:[7.7657,4.5732],       location:"Osogbo, Osun State, Nigeria",
+        imageBlurb:"The Osun River flows through a sacred forest grove at Osogbo that has been maintained as the living home of the river goddess Osun for centuries, and the annual festival brings thousands of worshippers to the water's edge because Yoruba belief holds that rivers are not merely geographic features but divine beings who directly govern human fertility and prosperity." },
+      { src:"images/yoruba/3.jpg", coords:[7.8500,3.9333],       location:"Oyo State, Nigeria",
+        imageBlurb:"The Egungun tradition originated in the ancient Oyo Empire on the savanna-forest transition zone of southwestern Nigeria, where the open grassland environment supported cavalry-based political power, and the Egungun masquerades were used to mediate between the living and ancestral spirits who were believed to watch over the land from which the community drew its power." }
+    ]
+  }
+];
+
+// ── CONFIG ─────────────────────────────────────────────────────
+const TOTAL_ROUNDS = 5;
+const MAX_SCORE    = 5000;
+const DECAY_KM     = 2000;
+
+// ── STATE ──────────────────────────────────────────────────────
+let rounds = [], roundIdx = 0, totalScore = 0, roundResults = [];
+let map = null, playerMarker = null, expanded = false;
+
+// ── MATH ───────────────────────────────────────────────────────
+function haversine(la1, lo1, la2, lo2) {
+  const R = 6371, r = Math.PI / 180;
+  const dLa = (la2-la1)*r, dLo = (lo2-lo1)*r;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+function calcScore(km) { return Math.max(0, Math.round(MAX_SCORE * Math.exp(-km / DECAY_KM))); }
+function fmtKm(km) {
+  if (km < 10)   return km.toFixed(1) + ' km';
+  if (km < 1000) return Math.round(km) + ' km';
+  return (km / 1000).toFixed(1) + 'k km';
+}
+function scoreGrade(pts) {
+  if (pts >= 4500) return 'Flawless!';
+  if (pts >= 3500) return 'Excellent!';
+  if (pts >= 2000) return 'Great!';
+  if (pts >= 700)  return 'Not bad';
+  return 'Far off!';
+}
+
+// ── SHUFFLE ─────────────────────────────────────────────────────
+function shuffle(a) {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+
+// ── MAP INIT ───────────────────────────────────────────────────
+// Called once. Leaflet script is above this script tag so L is defined.
+function initMap() {
+  map = L.map('map-canvas', {
+    center: [20, 10],
+    zoom: 1,
+    zoomControl: true,
+    attributionControl: false,
+    minZoom: 1,
+    maxZoom: 10
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+  map.on('click', function(e) {
+    var lat = e.latlng.lat, lng = e.latlng.lng;
+    if (playerMarker) {
+      playerMarker.setLatLng([lat, lng]);
+    } else {
+      playerMarker = L.circleMarker([lat, lng], {
+        radius: 9,
+        fillColor: '#4a9eff',
+        fillOpacity: 1,
+        color: '#ffffff',
+        weight: 2.5
+      }).addTo(map);
+    }
+    document.getElementById('btn-guess').disabled = false;
+    document.getElementById('map-hint').textContent = 'Pin placed — click GUESS to confirm';
+  });
+}
+
+function toggleExpand() {
+  expanded = !expanded;
+  document.getElementById('map-widget').classList.toggle('big', expanded);
+  document.getElementById('btn-expand').textContent = expanded ? '⤡ Shrink' : '⤢ Expand';
+  setTimeout(function() { if (map) map.invalidateSize(); }, 320);
+}
+
+// ── BUILD ROUNDS ───────────────────────────────────────────────
+function buildRounds() {
+  var pool = [];
+  RELIGIONS.forEach(function(r) {
+    r.images.forEach(function(img) { pool.push({ rel: r, img: img }); });
+  });
+  return shuffle(pool).slice(0, TOTAL_ROUNDS);
+}
+
+// ── START ──────────────────────────────────────────────────────
+function start() {
+  rounds      = buildRounds();
+  roundIdx    = 0;
+  totalScore  = 0;
+  roundResults = [];
+
+  document.getElementById('final-screen').classList.remove('open');
+  document.getElementById('result-panel').classList.remove('open');
+
+  initMap();
+  loadRound(0);
+}
+
+// ── LOAD ROUND ─────────────────────────────────────────────────
+function loadRound(i) {
+  var round = rounds[i];
+  var rel   = round.rel;
+  var img   = round.img;
+
+  // HUD
+  document.getElementById('h-round').textContent = i + 1;
+  document.getElementById('h-total').textContent  = TOTAL_ROUNDS;
+  document.getElementById('h-score').textContent  = totalScore.toLocaleString();
+
+  // Image — just set src, always block, no tricks
+  var el    = document.getElementById('game-image');
+  var errEl = document.getElementById('img-error');
+  el.classList.remove('dimmed');
+  errEl.style.display = 'none';
+  el.onerror = function() {
+    document.getElementById('img-error-path').textContent = img.src;
+    errEl.style.display = 'block';
+  };
+  el.src = img.src;
+
+  // Reset map
+  if (playerMarker) { map.removeLayer(playerMarker); playerMarker = null; }
+  // Clear any result markers/lines
+  map.eachLayer(function(layer) {
+    if (!(layer instanceof L.TileLayer)) map.removeLayer(layer);
+  });
+  map.setView([20, 10], 1);
+
+  // Reset controls
+  document.getElementById('btn-guess').disabled = true;
+  document.getElementById('map-hint').textContent = 'Click map to place pin';
+  document.getElementById('map-legend').style.display = 'none';
+  if (expanded) toggleExpand();
+
+  // Close result panel
+  document.getElementById('result-panel').classList.remove('open');
+}
+
+// ── SUBMIT GUESS ───────────────────────────────────────────────
+function submitGuess() {
+  if (!playerMarker) return;
+
+  var round  = rounds[roundIdx];
+  var rel    = round.rel;
+  var img    = round.img;
+  var guess  = playerMarker.getLatLng();
+  var actual = img.coords;
+
+  var distKm     = haversine(guess.lat, guess.lng, actual[0], actual[1]);
+  var pts        = calcScore(distKm);
+  totalScore    += pts;
+  roundResults.push({ name: rel.name, pts: pts, dist: distKm });
+
+  // Dim game image
+  document.getElementById('game-image').classList.add('dimmed');
+
+  // Disable guess button
+  document.getElementById('btn-guess').disabled = true;
+  document.getElementById('map-hint').textContent = 'See result →';
+
+  // Expand map and show both markers
+  if (!expanded) toggleExpand();
+
+  // Clear player marker and re-add both
+  map.eachLayer(function(layer) {
+    if (!(layer instanceof L.TileLayer)) map.removeLayer(layer);
+  });
+
+  // Player guess (blue)
+  L.circleMarker([guess.lat, guess.lng], {
+    radius: 9, fillColor: '#4a9eff', fillOpacity: 1, color: '#fff', weight: 2.5
+  }).bindPopup('<b>Your guess</b>').addTo(map);
+
+  // Actual location (religion color)
+  var actualIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:16px;height:16px;border-radius:50%;background:' + rel.color + ';border:3px solid #fff;box-shadow:0 0 10px ' + rel.color + '99"></div>',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
+  L.marker(actual, { icon: actualIcon })
+    .bindPopup('<b>' + rel.name + '</b><br>' + img.location)
+    .openPopup()
+    .addTo(map);
+
+  // Dashed line
+  L.polyline([[guess.lat, guess.lng], actual], {
+    color: '#ffffff', weight: 2, dashArray: '8, 6', opacity: 0.6
+  }).addTo(map);
+
+  // Fit both points
+  var bounds = L.latLngBounds([guess.lat, guess.lng], actual);
+  var sameish = Math.abs(guess.lat - actual[0]) < 1 && Math.abs(guess.lng - actual[1]) < 1;
+  map.fitBounds(bounds, { padding: [40, 40], maxZoom: sameish ? 8 : 5 });
+
+  // Show legend
+  document.getElementById('leg-actual-dot').style.background = rel.color;
+  document.getElementById('map-legend').style.display = 'block';
+
+  // Populate result panel
+  document.getElementById('result-thumb').src    = img.src;
+  document.getElementById('result-thumb').style.display = 'block';
+  document.getElementById('sc-pts').textContent   = pts.toLocaleString();
+  document.getElementById('sc-grade').textContent = scoreGrade(pts);
+  document.getElementById('sc-dist').textContent  = fmtKm(distKm);
+  document.getElementById('sc-total').textContent = totalScore.toLocaleString();
+  document.getElementById('result-loc-txt').textContent = img.location;
+  document.getElementById('blurb-img').textContent = img.imageBlurb;
+  document.getElementById('blurb-rel').textContent  = rel.blurb;
+
+  var last = roundIdx >= TOTAL_ROUNDS - 1;
+  document.getElementById('btn-next').textContent = last ? 'SEE FINAL RESULTS →' : 'NEXT ROUND →';
+
+  document.getElementById('result-panel').classList.add('open');
+
+  // Recalculate map size after panel opens
+  setTimeout(function() { if (map) map.invalidateSize(); }, 50);
+}
+
+// ── NEXT ROUND ─────────────────────────────────────────────────
+function nextRound() {
+  roundIdx++;
+  if (roundIdx >= TOTAL_ROUNDS) {
+    showFinal();
+  } else {
+    document.getElementById('result-panel').classList.remove('open');
+    document.getElementById('game-image').classList.remove('dimmed');
+    loadRound(roundIdx);
+    setTimeout(function() { if (map) map.invalidateSize(); }, 100);
+  }
+}
+
+// ── FINAL ──────────────────────────────────────────────────────
+function showFinal() {
+  var maxPts = TOTAL_ROUNDS * MAX_SCORE;
+  document.getElementById('final-num').textContent   = totalScore.toLocaleString();
+  document.getElementById('final-denom').textContent = '/ ' + maxPts.toLocaleString() + ' pts';
+
+  var pct = totalScore / maxPts;
+  document.getElementById('final-grade').textContent =
+    pct >= 0.9 ? '🏆 World Religion Expert' :
+    pct >= 0.7 ? '🌟 Geographic Scholar'    :
+    pct >= 0.5 ? '📖 Curious Explorer'      :
+    pct >= 0.3 ? '🌍 Aspiring Pilgrim'      : '🔍 Keep Exploring';
+
+  var grid = document.getElementById('final-grid');
+  grid.innerHTML = '';
+  roundResults.forEach(function(r, i) {
+    var d = document.createElement('div');
+    d.className = 'final-card';
+    d.innerHTML =
+      '<div>Round ' + (i+1) + ': ' + r.name + '</div>' +
+      '<div class="fc-score">' + r.pts.toLocaleString() + ' pts</div>' +
+      '<div class="fc-dist">' + fmtKm(r.dist) + ' off</div>';
+    grid.appendChild(d);
+  });
+
+  document.getElementById('result-panel').classList.remove('open');
+  document.getElementById('final-screen').classList.add('open');
+}
+
+function restart() {
+  // Destroy old map so we can re-init cleanly
+  if (map) { map.remove(); map = null; playerMarker = null; }
+  start();
+}
+
+// ── GO ─────────────────────────────────────────────────────────
+start();
+</script>
+</body>
+</html>
